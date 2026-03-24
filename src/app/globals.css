@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #111827;
+  --bg-card: #1a2332;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --border-color: #2d3748;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a5568;
+}
+
+/* Glow effects */
+.glow-green {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+}
+
+.glow-green:hover {
+  box-shadow: 0 0 30px rgba(34, 197, 94, 0.5);
+}
+
+/* Card styles */
+.card {
+  @apply bg-[#1a2332] border border-[#2d3748] rounded-xl p-6;
+}
+
+/* Input styles */
+.input {
+  @apply w-full bg-[#0a0e17] border border-[#2d3748] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-500 transition-colors;
+}
+
+/* Button styles */
+.btn {
+  @apply px-6 py-3 rounded-lg font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply btn bg-green-500 text-black hover:bg-green-400 glow-green;
+}
+
+.btn-secondary {
+  @apply btn bg-[#2d3748] text-white hover:bg-[#3d4758];
+}
+
+.btn-danger {
+  @apply btn bg-red-500 text-white hover:bg-red-400;
+}
+
+/* Table styles */
+.table-container {
+  @apply overflow-x-auto rounded-lg border border-[#2d3748];
+}
+
+.table {
+  @apply w-full text-left;
+}
+
+.table th {
+  @apply bg-[#111827] px-4 py-3 text-sm font-semibold text-gray-400 uppercase tracking-wider;
+}
+
+.table td {
+  @apply px-4 py-3 border-t border-[#2d3748];
+}
+
+/* Animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Gradient text */
+.gradient-text {
+  @apply bg-gradient-to-r from-green-400 to-emerald-500 bg-clip-text text-transparent;
+}

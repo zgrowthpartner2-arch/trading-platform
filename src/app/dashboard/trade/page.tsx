@@ -20,6 +20,7 @@ export default function TradePage() {
   const [tradeLoading, setTradeLoading] = useState(false)
   
   const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy')
+  const [inputMode, setInputMode] = useState<'crypto' | 'usdt'>('usdt')
   const [amount, setAmount] = useState('')
   const [message, setMessage] = useState({ type: '', text: '' })
 
@@ -44,10 +45,24 @@ export default function TradePage() {
     }
   }
 
+  const getCryptoAmount = () => {
+    if (!amount || !selectedCoin) return 0
+    if (inputMode === 'crypto') return parseFloat(amount)
+    return parseFloat(amount) / selectedCoin.price
+  }
+
+  const getUsdtAmount = () => {
+    if (!amount || !selectedCoin) return 0
+    if (inputMode === 'usdt') return parseFloat(amount)
+    return parseFloat(amount) * selectedCoin.price
+  }
+
   const handleTrade = async () => {
     if (!amount || parseFloat(amount) <= 0 || !selectedCoin) return
     setTradeLoading(true)
     setMessage({ type: '', text: '' })
+
+    const cryptoAmount = getCryptoAmount()
 
     try {
       const res = await fetch('/api/trade', {
@@ -56,7 +71,7 @@ export default function TradePage() {
         body: JSON.stringify({
           type: tradeType,
           coinId: selectedCoin.id,
-          amount: parseFloat(amount)
+          amount: cryptoAmount
         })
       })
 
@@ -66,8 +81,8 @@ export default function TradePage() {
       setMessage({
         type: 'success',
         text: tradeType === 'buy'
-          ? `Compra exitosa: ${amount} ${selectedCoin.symbol} por $${data.trade.total.toFixed(2)}`
-          : `Venta exitosa: ${amount} ${selectedCoin.symbol} por $${data.trade.total.toFixed(2)}`
+          ? `✅ Compraste ${cryptoAmount.toFixed(8)} ${selectedCoin.symbol} por $${data.trade.total.toFixed(2)} USDT`
+          : `✅ Vendiste ${cryptoAmount.toFixed(8)} ${selectedCoin.symbol} por $${data.trade.total.toFixed(2)} USDT`
       })
       setAmount('')
       fetchData()
@@ -78,13 +93,29 @@ export default function TradePage() {
     }
   }
 
-  const calculateTotal = () => {
-    if (!amount || !selectedCoin) return 0
-    return parseFloat(amount) * selectedCoin.price
-  }
-
   const getCryptoBalance = (coinId: string) => {
     return userBalances[coinId] || 0
+  }
+
+  const setPercentage = (pct: number) => {
+    if (!selectedCoin) return
+    
+    if (tradeType === 'buy') {
+      const maxUsdt = usdtBalance * pct / 100
+      if (inputMode === 'usdt') {
+        setAmount(maxUsdt.toFixed(2))
+      } else {
+        setAmount((maxUsdt / selectedCoin.price).toFixed(8))
+      }
+    } else {
+      const balance = getCryptoBalance(selectedCoin.id)
+      const maxCrypto = balance * pct / 100
+      if (inputMode === 'crypto') {
+        setAmount(maxCrypto.toFixed(8))
+      } else {
+        setAmount((maxCrypto * selectedCoin.price).toFixed(2))
+      }
+    }
   }
 
   if (loading) {
@@ -209,9 +240,10 @@ export default function TradePage() {
                 </div>
               </div>
 
+              {/* Buy/Sell Toggle */}
               <div className="flex gap-2 mb-6">
                 <button
-                  onClick={() => setTradeType('buy')}
+                  onClick={() => { setTradeType('buy'); setAmount(''); setInputMode('usdt'); }}
                   className={`flex-1 py-3 rounded-lg font-semibold transition-colors ${
                     tradeType === 'buy' ? 'bg-green-500 text-black' : 'bg-[#2d3748] text-gray-400 hover:text-white'
                   }`}
@@ -219,7 +251,7 @@ export default function TradePage() {
                   Comprar
                 </button>
                 <button
-                  onClick={() => setTradeType('sell')}
+                  onClick={() => { setTradeType('sell'); setAmount(''); setInputMode('crypto'); }}
                   className={`flex-1 py-3 rounded-lg font-semibold transition-colors ${
                     tradeType === 'sell' ? 'bg-red-500 text-white' : 'bg-[#2d3748] text-gray-400 hover:text-white'
                   }`}
@@ -238,40 +270,61 @@ export default function TradePage() {
                 </div>
               )}
 
+              {/* Input Mode Toggle */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setInputMode('usdt')}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    inputMode === 'usdt' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'bg-[#2d3748] text-gray-400'
+                  }`}
+                >
+                  Ingresar en USDT
+                </button>
+                <button
+                  onClick={() => setInputMode('crypto')}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    inputMode === 'crypto' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'bg-[#2d3748] text-gray-400'
+                  }`}
+                >
+                  Ingresar en {selectedCoin.symbol}
+                </button>
+              </div>
+
+              {/* Amount Input */}
               <div className="mb-4">
                 <div className="flex justify-between mb-2">
-                  <label className="text-sm text-gray-400">Cantidad ({selectedCoin.symbol})</label>
+                  <label className="text-sm text-gray-400">
+                    {tradeType === 'buy' ? 'Pagas' : 'Vendes'} ({inputMode === 'usdt' ? 'USDT' : selectedCoin.symbol})
+                  </label>
                   <span className="text-sm text-gray-400">
-                    {tradeType === 'buy' 
-                      ? `Disponible: $${usdtBalance.toFixed(2)} USDT`
-                      : `Disponible: ${getCryptoBalance(selectedCoin.id).toFixed(8)} ${selectedCoin.symbol}`
+                    Disponible: {tradeType === 'buy' 
+                      ? `$${usdtBalance.toFixed(2)} USDT`
+                      : `${getCryptoBalance(selectedCoin.id).toFixed(8)} ${selectedCoin.symbol}`
                     }
                   </span>
                 </div>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="input text-lg"
-                  placeholder="0.00"
-                  min="0"
-                  step="0.00000001"
-                />
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="input text-lg pr-20"
+                    placeholder="0.00"
+                    min="0"
+                    step={inputMode === 'usdt' ? '0.01' : '0.00000001'}
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">
+                    {inputMode === 'usdt' ? 'USDT' : selectedCoin.symbol}
+                  </span>
+                </div>
               </div>
 
+              {/* Quick percentages */}
               <div className="flex gap-2 mb-4">
                 {[25, 50, 75, 100].map((pct) => (
                   <button
                     key={pct}
-                    onClick={() => {
-                      if (tradeType === 'buy') {
-                        const maxAmount = usdtBalance / selectedCoin.price
-                        setAmount((maxAmount * pct / 100).toFixed(8))
-                      } else {
-                        const balance = getCryptoBalance(selectedCoin.id)
-                        setAmount((balance * pct / 100).toFixed(8))
-                      }
-                    }}
+                    onClick={() => setPercentage(pct)}
                     className="flex-1 py-2 bg-[#2d3748] rounded text-sm hover:bg-[#3d4758] transition-colors"
                   >
                     {pct}%
@@ -279,10 +332,30 @@ export default function TradePage() {
                 ))}
               </div>
 
-              <div className="bg-[#0a0e17] rounded-lg p-4 mb-4">
+              {/* Preview */}
+              <div className="bg-[#0a0e17] rounded-lg p-4 mb-4 space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Total USDT</span>
-                  <span className="text-2xl font-bold">${calculateTotal().toFixed(2)}</span>
+                  <span className="text-gray-400">
+                    {tradeType === 'buy' ? 'Pagas' : 'Vendes'}
+                  </span>
+                  <span className="text-xl font-bold">
+                    {tradeType === 'buy' 
+                      ? `$${getUsdtAmount().toFixed(2)} USDT`
+                      : `${getCryptoAmount().toFixed(8)} ${selectedCoin.symbol}`
+                    }
+                  </span>
+                </div>
+                <div className="border-t border-[#2d3748]"></div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400">
+                    {tradeType === 'buy' ? 'Recibes' : 'Recibes'}
+                  </span>
+                  <span className="text-xl font-bold text-green-400">
+                    {tradeType === 'buy'
+                      ? `${getCryptoAmount().toFixed(8)} ${selectedCoin.symbol}`
+                      : `$${getUsdtAmount().toFixed(2)} USDT`
+                    }
+                  </span>
                 </div>
               </div>
 

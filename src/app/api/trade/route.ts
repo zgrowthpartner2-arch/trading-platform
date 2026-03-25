@@ -1,23 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { tradeSchema } from '@/lib/validations'
 import { distributeCommissions } from '@/lib/referrals'
 
-// Mock price (in production, this would come from an API)
-const MOCK_BTC_PRICE = 67500
+export const dynamic = 'force-dynamic'
 
+// GET - Obtener monedas disponibles y balances del usuario
 export async function GET() {
-  // Return current mock price
-  return NextResponse.json({
-    symbol: 'BTC/USDT',
-    price: MOCK_BTC_PRICE,
-    change24h: 2.34,
-    high24h: MOCK_BTC_PRICE * 1.03,
-    low24h: MOCK_BTC_PRICE * 0.97
-  })
+  try {
+    const user = await getCurrentUser()
+    
+    const coins = await prisma.coin.findMany({
+      where: { isActive: true },
+      orderBy: { symbol: 'asc' }
+    })
+
+    let userBalances: Record<string, number> = {}
+    
+    if (user) {
+      const balances = await prisma.cryptoBalance.findMany({
+        where: { userId: user.id },
+        include: { coin: true }
+      })
+      
+      balances.forEach(b => {
+        userBalances[b.coinId] = b.amount
+      })
+    }
+
+    return NextResponse.json({ 
+      coins,
+      userBalances,
+      usdtBalance: user?.wallet?.balance || 0
+    })
+  } catch (error) {
+    console.error('Trade GET error:', error)
+    return NextResponse.json({ error: 'Error' }, { status: 500 })
+  }
 }
 
+// POST - Ejecutar trade (compra/venta)
 export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -26,76 +48,134 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const data = tradeSchema.parse(body)
-    const currentBalance = user.wallet?.balance || 0
+    const { type, coinId, amount } = body
 
-    if (data.type === 'buy') {
-      // Buying: need enough USDT
-      if (currentBalance < data.amount) {
-        return NextResponse.json(
-          { error: 'Saldo USDT insuficiente' },
-          { status: 400 }
-        )
+    if (!type || !coinId || !amount || amount <= 0) {
+      return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 })
+    }
+
+    const coin = await prisma.coin.findUnique({
+      where: { id: coinId }
+    })
+
+    if (!coin || !coin.isActive) {
+      return NextResponse.json({ error: 'Moneda no disponible' }, { status: 400 })
+    }
+
+    const usdtBalance = user.wallet?.balance || 0
+
+    if (type === 'buy') {
+      const usdtNeeded = amount * coin.price
+      
+      if (usdtBalance < usdtNeeded) {
+        return NextResponse.json({ error: 'Saldo USDT insuficiente' }, { status: 400 })
       }
 
-      const btcAmount = data.amount / MOCK_BTC_PRICE
+      const existingBalance = await prisma.cryptoBalance.findUnique({
+        where: {
+          userId_coinId: {
+            userId: user.id,
+            coinId: coin.id
+          }
+        }
+      })
 
       await prisma.$transaction([
         prisma.wallet.update({
           where: { userId: user.id },
-          data: { balance: { decrement: data.amount } }
+          data: { balance: { decrement: usdtNeeded } }
         }),
+        existingBalance
+          ? prisma.cryptoBalance.update({
+              where: { id: existingBalance.id },
+              data: { amount: { increment: amount } }
+            })
+          : prisma.cryptoBalance.create({
+              data: {
+                userId: user.id,
+                coinId: coin.id,
+                amount: amount
+              }
+            }),
         prisma.transaction.create({
           data: {
             userId: user.id,
             type: 'trade_buy',
-            amount: -data.amount,
-            description: `Compra ${btcAmount.toFixed(8)} BTC @ $${MOCK_BTC_PRICE}`
+            amount: -usdtNeeded,
+            description: `Compra ${amount} ${coin.symbol} @ $${coin.price}`,
+            coinId: coin.id
           }
         })
       ])
 
-      // Distribute commissions to upline
-      await distributeCommissions(user.id, data.amount, 'trade_buy')
+      await distributeCommissions(user.id, usdtNeeded, 'trade_buy')
 
       return NextResponse.json({
         success: true,
         trade: {
           type: 'buy',
-          usdtAmount: data.amount,
-          btcAmount,
-          price: MOCK_BTC_PRICE
+          coin: coin.symbol,
+          amount,
+          price: coin.price,
+          total: usdtNeeded
         }
       })
     }
 
-    // Selling: simulated - just adds USDT back
-    await prisma.$transaction([
-      prisma.wallet.update({
-        where: { userId: user.id },
-        data: { balance: { increment: data.amount } }
-      }),
-      prisma.transaction.create({
-        data: {
-          userId: user.id,
-          type: 'trade_sell',
-          amount: data.amount,
-          description: `Venta BTC por ${data.amount} USDT @ $${MOCK_BTC_PRICE}`
+    if (type === 'sell') {
+      const cryptoBalance = await prisma.cryptoBalance.findUnique({
+        where: {
+          userId_coinId: {
+            userId: user.id,
+            coinId: coin.id
+          }
         }
       })
-    ])
 
-    // Distribute commissions to upline
-    await distributeCommissions(user.id, data.amount, 'trade_sell')
-
-    return NextResponse.json({
-      success: true,
-      trade: {
-        type: 'sell',
-        usdtAmount: data.amount,
-        price: MOCK_BTC_PRICE
+      if (!cryptoBalance || cryptoBalance.amount < amount) {
+        return NextResponse.json(
+          { error: `Saldo ${coin.symbol} insuficiente` },
+          { status: 400 }
+        )
       }
-    })
+
+      const usdtToReceive = amount * coin.price
+
+      await prisma.$transaction([
+        prisma.cryptoBalance.update({
+          where: { id: cryptoBalance.id },
+          data: { amount: { decrement: amount } }
+        }),
+        prisma.wallet.update({
+          where: { userId: user.id },
+          data: { balance: { increment: usdtToReceive } }
+        }),
+        prisma.transaction.create({
+          data: {
+            userId: user.id,
+            type: 'trade_sell',
+            amount: usdtToReceive,
+            description: `Venta ${amount} ${coin.symbol} @ $${coin.price}`,
+            coinId: coin.id
+          }
+        })
+      ])
+
+      await distributeCommissions(user.id, usdtToReceive, 'trade_sell')
+
+      return NextResponse.json({
+        success: true,
+        trade: {
+          type: 'sell',
+          coin: coin.symbol,
+          amount,
+          price: coin.price,
+          total: usdtToReceive
+        }
+      })
+    }
+
+    return NextResponse.json({ error: 'Tipo de operación inválido' }, { status: 400 })
   } catch (error) {
     console.error('Trade error:', error)
     return NextResponse.json({ error: 'Error en operación' }, { status: 500 })
